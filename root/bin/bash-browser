@@ -37,6 +37,38 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Basic HTML tag stripping and decoding
+# Remove HTML tags, keeping the text content
+clean_content=""
+while IFS= read -r line; do
+    # Decode common HTML entities
+    processed_line="$line"
+    processed_line=$(echo "$processed_line" | sed 's/&amp;/\&/g')
+    processed_line=$(echo "$processed_line" | sed 's/&lt;/\</g')
+    processed_line=$(echo "$processed_line" | sed 's/&gt;/>/g')
+    processed_line=$(echo "$processed_line" | sed 's/&quot;/"/g')
+    processed_line=$(echo "$processed_line" | sed "s/&#39;/'/g")
+    
+    # Remove HTML tags from each line, but replace certain tags with appropriate spacing
+    # First, replace closing tags with markers for special processing
+    processed_line=$(echo "$processed_line" | sed 's/<\/h[1-6]>/\n\n/g')
+    processed_line=$(echo "$processed_line" | sed 's/<\/p>/\n\n/g')
+    processed_line=$(echo "$processed_line" | sed 's/<br\s*\/\?>/\\n/g')
+    processed_line=$(echo "$processed_line" | sed 's/<\/li>/\n/g')
+    processed_line=$(echo "$processed_line" | sed 's/<\/div>/\n/g')
+    
+    # Remove all remaining HTML tags
+    processed_line=$(echo "$processed_line" | sed 's/<[^>]*>//g')
+    
+    # Add non-empty lines of content to clean_content
+    if [[ -n "$processed_line" ]]; then
+        clean_content+="$processed_line"$'\n'
+    fi
+done <<< "$content"
+
+# Update content variable with cleaned content
+content="$clean_content"
+
 # --- scrolling implementation ---
     
 # store content in an array
