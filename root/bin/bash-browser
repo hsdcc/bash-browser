@@ -1,0 +1,47 @@
+#!/bin/bash
+
+if [ $# -eq 0 ]; then
+    echo "usage: bash-browser <url>"
+    exit 1
+fi
+
+url="$1"
+echo "loading..."
+
+# extract host and path from url
+host="${url%%/*}"
+if [ "$host" = "$url" ]; then
+    path="/"
+else
+    path="/${url#$host}"
+fi
+
+echo "fetching: $url"
+echo "connecting to: $host"
+
+# attempt connection
+if exec 3<>/dev/tcp/"$host"/80 2>/dev/null; then
+    echo "connected to $host"
+    
+    # send http request
+    printf "GET $path HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" "$host" >&3
+    
+    echo "sent http request"
+    
+    # read response - note: bash read is used instead of external tools
+    while IFS= read -r line <&3; do
+        echo "$line"
+    done
+    
+    # close connection
+    exec 3<&-
+    exec 3>&-
+    
+else
+    echo "error: could not connect to $host"
+    echo "possible reasons:"
+    echo "- /dev/tcp not supported"
+    echo "- dns resolution not configured (need /etc/resolv.conf)"
+    echo "- network connectivity issue"
+    exit 1
+fi
