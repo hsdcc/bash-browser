@@ -1,0 +1,62 @@
+#!/bin/bash
+download() {
+  local url="$1"
+  local port="${2:-80}"
+
+  # Extract host and path from url
+  if [[ "$url" == *"/"* ]]; then
+    # URL contains path, parse it
+    IFS='/' read -r protocol _ host query <<< "$url"
+    # Reconstruct query as rest of URL
+    query=$(echo "$url" | sed "s|[^/]*/[^/]*/[^/]*||")
+  else
+    # URL is just host, no path
+    host="$url"
+    query=""
+  fi
+
+  # Ensure query starts with / if not empty
+  if [ -n "$query" ] && [[ "$query" != /* ]]; then
+    query="/$query"
+  elif [ -z "$query" ]; then
+    query="/"
+  fi
+
+  # Send the HTTP request.
+  exec 3<"/dev/tcp/${host}/${port}"
+  {
+    printf '%s\r\n%s\r\n\r\n' \
+      "GET ${query} HTTP/1.0" \
+      "Host: $host"
+  } >&3
+
+  # Strip the HTTP headers.
+  while IFS= read -r line; do
+    [[ "$line" == $'\r' ]] && break
+  done <&3
+
+  # Output the file.
+  nul='\0'
+  while IFS= read -d '' -r line || {
+    nul=""
+    [[ -n "$line" ]]
+  }; do
+    printf "%s%b" "$line" "$nul"
+  done <&3
+
+  exec 3>&-
+}
+
+if [ "$1" = "-o" ]; then
+  if [ -z "$4" ]; then
+    download "$3" 80 >"$2"
+  else
+    download "$3" "$4" >"$2"
+  fi
+else
+  if [ -z "$2" ]; then
+    download "$1" 80
+  else
+    download "$1" "$2"
+  fi
+fi

@@ -28,105 +28,76 @@ fi
 url="$1"
 echo "loading..."
 
-# extract host and path from url
-host="${url%%/*}"
-if [ "$host" = "$url" ]; then
-    path="/"
-else
-    path="/${url#$host}"
-fi
-
 echo "fetching: $url"
-echo "connecting to: $host"
 
-# attempt connection
-if exec 3<>/dev/tcp/"$host"/80 2>/dev/null; then
-    echo "connected to $host"
-    
-    # send http request
-    printf "GET $path HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" "$host" >&3
-    
-    echo "sent http request"
-    
-    # read entire response into a variable
-    content=""
-    while IFS= read -r line <&3; do
-        content+="$line"$'
-'
-    done
-    
-    # --- scrolling implementation ---
-    
-    # store content in an array
-    mapfile -t lines <<< "$content"
-    
-    # get terminal size
-    get_term_size
-    height=${term_height}
-    
-    # leave room for status bar
-    view_height=$((height - 1))
-    
-    offset=0
-    line_count=${#lines[@]}
-    
-    # hide cursor
-    printf "\e[?25l"
-    
-    while true; do
-        # clear screen
-        printf "\033c"
-        
-        # display content
-        for ((i=0; i<view_height; i++)); do
-            line_index=$((offset + i))
-            if [ $line_index -lt $line_count ]; then
-                echo "${lines[$line_index]}"
-            fi
-        done
-        
-        # status bar
-        printf "\e[${height};0H" # move to last line
-        printf "\e[44m" # blue background
-        status_text=$(printf "Line %s-%s/%s (j=down, k=up, q=quit)" "$((offset + 1))" "$((offset + view_height))" "$line_count")
-        printf "%-${term_width}s" "$status_text" # pad to full width
-        printf "\e[0m" # reset color
-        
-        # get user input
-        read -s -n 1 key
-        
-        case "$key" in
-            'q')
-                break
-                ;;
-            'j')
-                # scroll down
-                if [ $((offset + view_height)) -lt $line_count ]; then
-                    offset=$((offset + 1))
-                fi
-                ;;
-            'k')
-                # scroll up
-                if [ $offset -gt 0 ]; then
-                    offset=$((offset - 1))
-                fi
-                ;;
-        esac
-done
-    
-    # show cursor and clear screen on exit
-    printf "\e[?25h"
-    printf "\033c"
-    
-    # close connection
-    exec 3<&-
-    exec 3>&-
-    
-else
-    echo "error: could not connect to $host"
-    echo "possible reasons:"
-    echo "- /dev/tcp not supported"
-    echo "- dns resolution not configured (need /etc/resolv.conf)"
-    echo "- network connectivity issue"
+# Use the curl script to download content
+content="$("/home/meow/code/bash-browser/root/bin/curl" "$url")"
+if [ $? -ne 0 ]; then
+    echo "error: could not fetch content from $url"
     exit 1
 fi
+
+# --- scrolling implementation ---
+    
+# store content in an array
+mapfile -t lines <<< "$content"
+    
+# get terminal size
+get_term_size
+height=${term_height}
+    
+# leave room for status bar
+view_height=$((height - 1))
+    
+offset=0
+line_count=${#lines[@]}
+    
+# hide cursor
+printf "\e[?25l"
+    
+while true; do
+    # clear screen
+    printf "\033c"
+        
+    # display content
+    for ((i=0; i<view_height; i++)); do
+        line_index=$((offset + i))
+        if [ $line_index -lt $line_count ]; then
+            echo "${lines[$line_index]}"
+        fi
+    done
+        
+    # status bar
+    printf "\e[${height};0H" # move to last line
+    printf "\e[44m" # blue background
+    status_text=$(printf "Line %s-%s/%s (j=down, k=up, q=quit)" "$((offset + 1))" "$((offset + view_height))" "$line_count")
+    printf "%-${term_width}s" "$status_text" # pad to full width
+    printf "\e[0m" # reset color
+        
+    # get user input
+    read -s -n 1 key
+        
+    case "$key" in
+        'q')
+            break
+            ;;
+        'j')
+            # scroll down
+            if [ $((offset + view_height)) -lt $line_count ]; then
+                offset=$((offset + 1))
+            fi
+            ;;
+        'k')
+            # scroll up
+            if [ $offset -gt 0 ]; then
+                offset=$((offset - 1))
+            fi
+            ;;
+    esac
+done
+    
+# show cursor and clear screen on exit
+printf "\e[?25h"
+printf "\033c"
+    
+
