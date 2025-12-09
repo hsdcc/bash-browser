@@ -38,27 +38,51 @@ if [ $? -ne 0 ]; then
 fi
 
 # Basic HTML tag stripping and decoding
-# Remove HTML tags, keeping the text content
+# Remove HTML tags and comments, keeping the text content
 clean_content=""
 while IFS= read -r line; do
-    # Decode common HTML entities
     processed_line="$line"
-    processed_line=$(echo "$processed_line" | sed 's/&amp;/\&/g')
-    processed_line=$(echo "$processed_line" | sed 's/&lt;/\</g')
-    processed_line=$(echo "$processed_line" | sed 's/&gt;/>/g')
-    processed_line=$(echo "$processed_line" | sed 's/&quot;/"/g')
-    processed_line=$(echo "$processed_line" | sed "s/&#39;/'/g")
     
-    # Remove HTML tags from each line, but replace certain tags with appropriate spacing
-    # First, replace closing tags with markers for special processing
-    processed_line=$(echo "$processed_line" | sed 's/<\/h[1-6]>/\n\n/g')
-    processed_line=$(echo "$processed_line" | sed 's/<\/p>/\n\n/g')
-    processed_line=$(echo "$processed_line" | sed 's/<br\s*\/\?>/\\n/g')
-    processed_line=$(echo "$processed_line" | sed 's/<\/li>/\n/g')
-    processed_line=$(echo "$processed_line" | sed 's/<\/div>/\n/g')
+    # Remove HTML comments using pure bash
+    while [[ "$processed_line" == *"<!--"*"-->"* ]]; do
+        start_comment="${processed_line%%<!--*}"
+        end_comment="${processed_line#*-->}"
+        processed_line="${start_comment}${end_comment}"
+    done
     
-    # Remove all remaining HTML tags
-    processed_line=$(echo "$processed_line" | sed 's/<[^>]*>//g')
+    # Decode common HTML entities  
+    processed_line="${processed_line//&amp;/&}"
+    processed_line="${processed_line//&lt;/<}"
+    processed_line="${processed_line//&gt;/>}"
+    processed_line="${processed_line//&quot;/\"}"
+    processed_line="${processed_line//&#39;/\'}"
+    
+    # Replace certain closing tags with newlines before removing all tags
+    # Handle h1-h6 tags
+    processed_line="${processed_line//<\/h1>/$'\n'$'\n'}"
+    processed_line="${processed_line//<\/h2>/$'\n'$'\n'}"
+    processed_line="${processed_line//<\/h3>/$'\n'$'\n'}"
+    processed_line="${processed_line//<\/h4>/$'\n'$'\n'}"
+    processed_line="${processed_line//<\/h5>/$'\n'$'\n'}"
+    processed_line="${processed_line//<\/h6>/$'\n'$'\n'}"
+    
+    # Replace other tags with newlines
+    processed_line="${processed_line//<\/p>/$'\n'$'\n'}"
+    processed_line="${processed_line//<br>/$'\n'}"
+    processed_line="${processed_line//<br\/>/$'\n'}"
+    processed_line="${processed_line//<br \/>/$'\n'}"
+    processed_line="${processed_line//<\/li>/$'\n'}"
+    processed_line="${processed_line//<\/div>/$'\n'}"
+    processed_line="${processed_line//<\/tr>/$'\n'}"
+    processed_line="${processed_line//<\/td>/	}"  # tab character
+    processed_line="${processed_line//<\/th>/	}"  # tab character
+    
+    # Remove all remaining HTML tags iteratively
+    while [[ "$processed_line" == *"<"*">"* ]]; do
+        start_part="${processed_line%%<*}"
+        remaining="${processed_line#*>}"
+        processed_line="${start_part}${remaining}"
+    done
     
     # Add non-empty lines of content to clean_content
     if [[ -n "$processed_line" ]]; then
