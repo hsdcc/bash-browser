@@ -37,61 +37,56 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Basic HTML tag stripping and decoding
-# Remove HTML tags and comments, keeping the text content
-clean_content=""
-while IFS= read -r line; do
-    processed_line="$line"
-    
-    # Remove HTML comments using pure bash
-    while [[ "$processed_line" == *"<!--"*"-->"* ]]; do
-        start_comment="${processed_line%%<!--*}"
-        end_comment="${processed_line#*-->}"
-        processed_line="${start_comment}${end_comment}"
-    done
-    
-    # Decode common HTML entities  
-    processed_line="${processed_line//&amp;/&}"
-    processed_line="${processed_line//&lt;/<}"
-    processed_line="${processed_line//&gt;/>}"
-    processed_line="${processed_line//&quot;/\"}"
-    processed_line="${processed_line//&#39;/\'}"
-    
-    # Replace certain closing tags with newlines before removing all tags
-    # Handle h1-h6 tags
-    processed_line="${processed_line//<\/h1>/$'\n'$'\n'}"
-    processed_line="${processed_line//<\/h2>/$'\n'$'\n'}"
-    processed_line="${processed_line//<\/h3>/$'\n'$'\n'}"
-    processed_line="${processed_line//<\/h4>/$'\n'$'\n'}"
-    processed_line="${processed_line//<\/h5>/$'\n'$'\n'}"
-    processed_line="${processed_line//<\/h6>/$'\n'$'\n'}"
-    
-    # Replace other tags with newlines
-    processed_line="${processed_line//<\/p>/$'\n'$'\n'}"
-    processed_line="${processed_line//<br>/$'\n'}"
-    processed_line="${processed_line//<br\/>/$'\n'}"
-    processed_line="${processed_line//<br \/>/$'\n'}"
-    processed_line="${processed_line//<\/li>/$'\n'}"
-    processed_line="${processed_line//<\/div>/$'\n'}"
-    processed_line="${processed_line//<\/tr>/$'\n'}"
-    processed_line="${processed_line//<\/td>/	}"  # tab character
-    processed_line="${processed_line//<\/th>/	}"  # tab character
-    
-    # Remove all remaining HTML tags iteratively
-    while [[ "$processed_line" == *"<"*">"* ]]; do
-        start_part="${processed_line%%<*}"
-        remaining="${processed_line#*>}"
-        processed_line="${start_part}${remaining}"
-    done
-    
-    # Add non-empty lines of content to clean_content
-    if [[ -n "$processed_line" ]]; then
-        clean_content+="$processed_line"$'\n'
-    fi
-done <<< "$content"
+# Basic HTML tag stripping and decoding, optimized to run on the whole content at once.
 
-# Update content variable with cleaned content
-content="$clean_content"
+# 1. Remove HTML comments using pure bash
+# This is still iterative, but runs on the whole buffer, not line-by-line
+while [[ "$content" == *"<!--"*"-->"* ]]; do
+    start_comment="${content%%<!--*}"
+    end_comment="${content#*-->}"
+    content="${start_comment}${end_comment}"
+done
+
+# 2. Replace certain closing tags with newlines before removing all other tags
+# Handle h1-h6 tags
+content="${content//<\/h1>/$'\n'$'\n'}"
+content="${content//<\/h2>/$'\n'$'\n'}"
+content="${content//<\/h3>/$'\n'$'\n'}"
+content="${content//<\/h4>/$'\n'$'\n'}"
+content="${content//<\/h5>/$'\n'$'\n'}"
+content="${content//<\/h6>/$'\n'$'\n'}"
+# Other block-level tags
+content="${content//<\/p>/$'\n'$'\n'}"
+content="${content//<br>/$'\n'}"
+content="${content//<br\/>/$'\n'}"
+content="${content//<br \/>/$'\n'}"
+content="${content//<\/li>/$'\n'}"
+content="${content//<\/div>/$'\n'}"
+content="${content//<\/tr>/$'\n'}"
+content="${content//<\/td>/	}"  # tab character
+content="${content//<\/th>/	}"  # tab character
+
+# 3. Remove all remaining HTML tags iteratively
+# This is the main bottleneck, but necessary for correctness in pure bash
+while [[ "$content" == *"<"*">"* ]]; do
+    start_part="${content%%<*}"
+    remaining="${content#*>}"
+    content="${start_part}${remaining}"
+done
+
+# 4. Decode common HTML entities  
+content="${content//&amp;/&}"
+content="${content//&lt;/<}"
+content="${content//&gt;/>}"
+content="${content//&quot;/\"}"
+content="${content//&#39;/\'}"
+
+# 5. Clean up extra blank lines
+# The previous steps can create lots of consecutive newlines, this collapses them.
+# Replace three or more newlines with two.
+while [[ "$content" == *$'\n\n\n'* ]]; do
+    content="${content//$'\n\n\n'/$'\n\n'}"
+done
 
 # --- scrolling implementation ---
     
