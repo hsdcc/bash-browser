@@ -1,5 +1,25 @@
 #!/bin/bash
 
+get_term_size() {
+    # This uses an alternative escape sequence (\e[18t) to get terminal size,
+    # which has proven to be more reliable.
+    # Response format: \e[8;<height>;<width>t
+    printf '\e[18t' > /dev/tty
+    
+    local response
+    read -s -t 1 -d t response < /dev/tty
+
+    if [[ -n "$response" && "$response" == *";"* && "$response" == *"8;"* ]]; then
+        response=${response#*;} # Remove leading junk up to first ;
+        term_height=${response%;*}
+        term_width=${response#*;} # Remove leading junk up to first ;
+    fi
+
+    # Fallback if detection fails
+    term_height=${term_height:-24}
+    term_width=${term_width:-80}
+}
+
 if [ $# -eq 0 ]; then
     echo "usage: bash-browser <url>"
     exit 1
@@ -28,10 +48,75 @@ if exec 3<>/dev/tcp/"$host"/80 2>/dev/null; then
     
     echo "sent http request"
     
-    # read response - note: bash read is used instead of external tools
+    # read entire response into a variable
+    content=""
     while IFS= read -r line <&3; do
-        echo "$line"
+        content+="$line"$'
+'
     done
+    
+    # --- scrolling implementation ---
+    
+    # store content in an array
+    mapfile -t lines <<< "$content"
+    
+    # get terminal size
+    get_term_size
+    height=${term_height}
+    
+    # leave room for status bar
+    view_height=$((height - 1))
+    
+    offset=0
+    line_count=${#lines[@]}
+    
+    # hide cursor
+    printf "\e[?25l"
+    
+    while true; do
+        # clear screen
+        printf "\033c"
+        
+        # display content
+        for ((i=0; i<view_height; i++)); do
+            line_index=$((offset + i))
+            if [ $line_index -lt $line_count ]; then
+                echo "${lines[$line_index]}"
+            fi
+        done
+        
+        # status bar
+        printf "\e[${height};0H" # move to last line
+        printf "\e[44m" # blue background
+        status_text=$(printf "Line %s-%s/%s (j=down, k=up, q=quit)" "$((offset + 1))" "$((offset + view_height))" "$line_count")
+        printf "%-${term_width}s" "$status_text" # pad to full width
+        printf "\e[0m" # reset color
+        
+        # get user input
+        read -s -n 1 key
+        
+        case "$key" in
+            'q')
+                break
+                ;;
+            'j')
+                # scroll down
+                if [ $((offset + view_height)) -lt $line_count ]; then
+                    offset=$((offset + 1))
+                fi
+                ;;
+            'k')
+                # scroll up
+                if [ $offset -gt 0 ]; then
+                    offset=$((offset - 1))
+                fi
+                ;;
+        esac
+done
+    
+    # show cursor and clear screen on exit
+    printf "\e[?25h"
+    printf "\033c"
     
     # close connection
     exec 3<&-
