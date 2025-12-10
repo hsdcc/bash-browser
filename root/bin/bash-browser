@@ -111,6 +111,26 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
+# Parse arguments
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --debug)
+      debug=1
+      verbose=1
+      ;;
+    --verbose)
+      debug=1
+      verbose=1
+      ;;
+    *)
+      args+=("$arg")
+      ;;
+  esac
+done
+
+set -- "${args[@]}"
+
 url="$1"
 if [[ ! "$url" == *"://"* ]]; then
   url="http://$url"
@@ -569,6 +589,9 @@ follow_links() {
   local link_index="${hint_lookup[$key]}"
   if [[ -n "$link_index" ]]; then
     local target_url="${visible_links[$link_index]}"
+    if [[ $debug -eq 1 ]]; then
+      debug_print "following link: $target_url"
+    fi
 
     printf "\e[?25h\033c"
 
@@ -585,6 +608,9 @@ follow_links() {
 
     # If target is already a full URL, we're done.
     if [[ "$target_url" == "http"* || "$target_url" == "https"* ]]; then
+      if [[ $debug -eq 1 ]]; then
+        debug_print "navigating to absolute URL: $target_url"
+      fi
       exec "$0" "$target_url"
       return
     fi
@@ -594,14 +620,24 @@ follow_links() {
     local host="${rest%%/*}"
     local path_part="${rest#$host}"
 
+    if [[ $debug -eq 1 ]]; then
+      debug_print "resolving relative link: $target_url against base: $base_url"
+    fi
+
     # If target is protocol-relative (e.g., //example.com), prepend protocol
     if [[ "$target_url" == //* ]]; then
+      if [[ $debug -eq 1 ]]; then
+        debug_print "navigating to protocol-relative URL: ${protocol}:${target_url}"
+      fi
       exec "$0" "${protocol}:${target_url}"
       return
     fi
 
     # If target is root-relative (e.g., /foo/bar), combine with host
     if [[ "$target_url" == /* ]]; then
+      if [[ $debug -eq 1 ]]; then
+        debug_print "navigating to root-relative URL: ${protocol}://${host}${target_url}"
+      fi
       exec "$0" "${protocol}://${host}${target_url}"
       return
     fi
@@ -664,6 +700,9 @@ follow_links() {
       final_path="/$final_path"
     fi
 
+    if [[ $debug -eq 1 ]]; then
+      debug_print "navigating to resolved URL: ${protocol}://${host}${final_path}"
+    fi
     exec "$0" "${protocol}://${host}${final_path}"
   fi
   # If key is not a valid hint, we do nothing and the main loop will redraw the screen.
