@@ -303,31 +303,78 @@ follow_links() {
     # Handle different types of relative URLs
     if [[ "$target_url" != "http"* ]]; then
       # Get the base URL components
-      local protocol="${url%%://*}"
-      local temp="${url#*//}"
-      local host="${temp%%/*}"
-      local base_path="${temp#"$host"}"
+      local original_url="$url"
+      # Extract protocol (http or https)
+      local protocol="${original_url%%://*}"
+      # Extract everything after the protocol
+      local after_protocol="${original_url#*://}"
+      # Extract the host (domain)
+      local host="${after_protocol%%/*}"
       
+      # Extract current path (everything after the host)
+      local current_path="${after_protocol#"$host"}"
+      
+      # If no path was found (i.e., original_url is just domain), default to root
+      if [[ "$current_path" == "$after_protocol" ]]; then
+        current_path="/"
+      elif [[ "$current_path" == "" ]]; then
+        current_path="/"
+      fi
+      
+      # If current_path is a file (not ending with /), extract the directory
+      if [[ "$current_path" != */ && "$current_path" != "/" ]]; then
+        current_path="${current_path%/*}/"
+        if [[ "$current_path" == "" ]]; then
+          current_path="/"
+        else
+          current_path="${current_path%/}/"
+        fi
+      fi
+      
+      # Build the final URL based on the type of relative path
       if [[ "$target_url" == "/"* ]]; then
-        # Root-relative URL like /foo/bar
+        # Root-relative: /path/to/file
         target_url="${protocol}://${host}${target_url}"
       elif [[ "$target_url" == "../"* ]]; then
-        # Parent directory relative URL like ../foo/bar
-        # Remove the current file name and go up directories as needed
-        while [[ "$target_url" == "../"* ]]; do
-          target_url="${target_url#../}"
-          # Remove last path component from base_path
-          base_path="${base_path%/*}"
+        # Directory traversal: ../path/to/file
+        # Start with current directory and go up for each ../
+        local work_path="$current_path"
+        
+        # Process each ../ component
+        local temp_target="$target_url"
+        while [[ "$temp_target" == "../"* ]]; do
+          # Remove one ../ from the target
+          temp_target="${temp_target#../}"
+          # Go up one directory in work_path
+          if [[ "$work_path" != "/" ]]; then
+            work_path="${work_path%/}"
+            work_path="${work_path%/*}/"
+            if [[ "$work_path" == "" ]]; then
+              work_path="/"
+            fi
+          fi
         done
-        target_url="${protocol}://${host}${base_path}/${target_url}"
+        
+        # Combine host, processed path, and remaining target
+        if [[ "$work_path" == "/" ]]; then
+          target_url="${protocol}://${host}/${temp_target}"
+        else
+          target_url="${protocol}://${host}${work_path}${temp_target}"
+        fi
       elif [[ "$target_url" == "./"* ]]; then
-        # Current directory relative like ./foo/bar
-        base_path="${base_path%/*}"  # Remove current file
-        target_url="${protocol}://${host}${base_path}/${target_url#./}"
+        # Current directory relative: ./path/to/file
+        if [[ "$current_path" == "/" ]]; then
+          target_url="${protocol}://${host}/${target_url#./}"
+        else
+          target_url="${protocol}://${host}${current_path}${target_url#./}"
+        fi
       else
-        # Same directory relative like foo.html
-        base_path="${base_path%/*}"  # Remove current file
-        target_url="${protocol}://${host}${base_path}/${target_url}"
+        # Same directory relative: filename.html
+        if [[ "$current_path" == "/" ]]; then
+          target_url="${protocol}://${host}/${target_url}"
+        else
+          target_url="${protocol}://${host}${current_path}${target_url}"
+        fi
       fi
     fi
 
@@ -367,7 +414,7 @@ while true; do
   # status bar
   printf "\e[${height};0H" # move to last line
   printf "\e[44m"          # blue background
-  status_text=$(printf "Line %s-%s/%s (j=down, k=up, q=quit, s=follow)" "$((offset + 1))" "$((offset + view_height))" "$line_count")
+  status_text=$(printf "%s | Line %s-%s/%s (j=down, k=up, q=quit, s=follow)" "$url" "$((offset + 1))" "$((offset + view_height))" "$line_count")
   printf "%-${term_width}s" "$status_text" # pad to full width
   printf "\e[0m"                           # reset color
 
