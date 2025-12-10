@@ -7,17 +7,17 @@ verbose=0
 args=()
 for arg in "$@"; do
   case "$arg" in
-    --debug)
-      debug=1
-      verbose=1
-      ;;
-    --verbose)
-      debug=1
-      verbose=1
-      ;;
-    *)
-      args+=("$arg")
-      ;;
+  --debug)
+    debug=1
+    verbose=1
+    ;;
+  --verbose)
+    debug=1
+    verbose=1
+    ;;
+  *)
+    args+=("$arg")
+    ;;
   esac
 done
 
@@ -40,15 +40,15 @@ print_content_preview() {
   if [[ $verbose -eq 1 ]]; then
     local preview_lines=5
     local line_count=0
-    
+
     while IFS= read -r line; do
       if ((line_count >= preview_lines)); then
-        echo "  ... and $(( $(wc -l <<< "$1") - preview_lines )) more lines" >&2
+        echo "  ... and $(($(wc -l <<<"$1") - preview_lines)) more lines" >&2
         break
       fi
-      echo "  Line $((line_count+1)): $line" >&2
+      echo "  Line $((line_count + 1)): $line" >&2
       ((line_count++))
-    done <<< "$1"
+    done <<<"$1"
   fi
 }
 
@@ -82,7 +82,7 @@ get_elapsed_time() {
   local elapsed_ns=$((current_time - timing_start_time))
   local elapsed_s=$((elapsed_ns / 1000000000))
   local elapsed_ms=$(((elapsed_ns % 1000000000) / 1000000))
-  
+
   echo "${elapsed_s}s ${elapsed_ms}ms"
 }
 
@@ -125,9 +125,9 @@ else
   echo "fetching: $url"
 fi
 
-start_timing  # Start measuring parsing time
+start_timing # Start measuring parsing time
 # Use the curl script to download content
-content="$("/home/meow/code/bash-browser/root/bin/curl" "$url")"
+content="$("/bin/curl" "$url")"
 if [ $? -ne 0 ]; then
   echo "error: could not fetch content from $url"
   exit 1
@@ -288,64 +288,64 @@ initial_length=${#temp_count_content}
 
 # Count and replace h1 tags (</h1> -> \n\n)
 temp_count_content="${temp_count_content//<\/h1>/}"
-h1_count=$(( (initial_length - ${#temp_count_content}) / 5 ))  # length of '</h1>' is 5
+h1_count=$(((initial_length - ${#temp_count_content}) / 5)) # length of '</h1>' is 5
 content="${content//<\/h1>/$'\n'$'\n'}"
 
 # Count and replace h2 tags (</h2> -> \n\n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/h2>/}"
-h2_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+h2_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/h2>/$'\n'$'\n'}"
 
 # Count and replace h3 tags (</h3> -> \n\n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/h3>/}"
-h3_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+h3_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/h3>/$'\n'$'\n'}"
 
 # Count and replace h4 tags (</h4> -> \n\n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/h4>/}"
-h4_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+h4_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/h4>/$'\n'$'\n'}"
 
 # Count and replace h5 tags (</h5> -> \n\n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/h5>/}"
-h5_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+h5_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/h5>/$'\n'$'\n'}"
 
 # Count and replace h6 tags (</h6> -> \n\n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/h6>/}"
-h6_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+h6_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/h6>/$'\n'$'\n'}"
 
 # Count and replace p tags (</p> -> \n\n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/p>/}"
-p_count=$(( (initial_length - ${#temp_count_content}) / 4 ))  # length of '</p>' is 4
+p_count=$(((initial_length - ${#temp_count_content}) / 4)) # length of '</p>' is 4
 content="${content//<\/p>/$'\n'$'\n'}"
 
 # Count and replace br tags (<br>, <br/>, <br /> -> \n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<br>/}"
-br_count=$(( (initial_length - ${#temp_count_content}) / 4 ))  # length of '<br>' is 4
+br_count=$(((initial_length - ${#temp_count_content}) / 4)) # length of '<br>' is 4
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<br\/>/}"
-br_count=$(( br_count + (initial_length - ${#temp_count_content}) / 5 ))  # length of '<br/>' is 5
+br_count=$((br_count + (initial_length - ${#temp_count_content}) / 5)) # length of '<br/>' is 5
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<br \/>/}"
-br_count=$(( br_count + (initial_length - ${#temp_count_content}) / 6 ))  # length of '<br />' is 6
+br_count=$((br_count + (initial_length - ${#temp_count_content}) / 6)) # length of '<br />' is 6
 content="${content//<br>/$'\n'}"
 content="${content//<br\/>/$'\n'}"
 content="${content//<br \/>/$'\n'}"
@@ -354,35 +354,35 @@ content="${content//<br \/>/$'\n'}"
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/li>/}"
-li_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+li_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/li>/$'\n'}"
 
 # Count and replace div tags (</div> -> \n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/div>/}"
-div_count=$(( (initial_length - ${#temp_count_content}) / 6 ))
+div_count=$(((initial_length - ${#temp_count_content}) / 6))
 content="${content//<\/div>/$'\n'}"
 
 # Count and replace tr tags (</tr> -> \n)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/tr>/}"
-tr_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+tr_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/tr>/$'\n'}"
 
 # Count and replace td tags (</td> -> tab)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/td>/}"
-td_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+td_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/td>/	}" # tab character
 
 # Count and replace th tags (</th> -> tab)
 temp_count_content="$content"
 initial_length=${#temp_count_content}
 temp_count_content="${temp_count_content//<\/th>/}"
-th_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
+th_count=$(((initial_length - ${#temp_count_content}) / 5))
 content="${content//<\/th>/	}" # tab character
 
 # Calculate total tag count
@@ -392,8 +392,8 @@ debug_print "parsing: replaced $total_closing_tags closing tags (h1: $h1_count, 
 # 3. Remove all remaining HTML tags iteratively
 debug_print "parsing: removing all remaining html tags"
 tag_count=0
-verbose_tags=()  # Only capture first few tags for detailed display
-max_iterations=1000  # Prevent infinite loops
+verbose_tags=()     # Only capture first few tags for detailed display
+max_iterations=1000 # Prevent infinite loops
 iteration=0
 
 while [[ "$content" == *"<"*">"* ]] && [[ $iteration -lt $max_iterations ]]; do
@@ -402,24 +402,24 @@ while [[ "$content" == *"<"*">"* ]] && [[ $iteration -lt $max_iterations ]]; do
   tag="${tag_and_rest%%>*}"
   remaining="${content#*>}"
   new_content="${start_part}${remaining}"
-  
+
   # If the content didn't change, we have an infinite loop situation
   if [[ "$new_content" == "$content" ]]; then
     debug_print "parsing: potential infinite loop detected at iteration $iteration, breaking"
     break
   fi
-  
+
   content="$new_content"
   ((tag_count++))
   ((iteration++))
-  
+
   # Keep track of first few tags for display, but limit to avoid too much output
   if [[ $debug -eq 1 ]] && [[ $verbose -eq 1 ]] && [[ $tag_count -le 5 ]]; then
     verbose_tags+=("<$tag>")
   fi
-  
+
   # Show progress every 50 tags to avoid overwhelming output
-  if [[ $debug -eq 1 ]] && (( tag_count % 50 == 0 )); then
+  if [[ $debug -eq 1 ]] && ((tag_count % 50 == 0)); then
     debug_print "parsing: removed $tag_count tags so far"
   fi
 done
@@ -446,27 +446,27 @@ debug_print "parsing: decoding html entities"
 # First &amp; entities
 original_len=${#content}
 content="${content//&amp;/&}"
-amp_count=$(( (original_len - ${#content}) / 4 ))  # &amp; is 5 chars, & is 1 char, difference is 4
+amp_count=$(((original_len - ${#content}) / 4)) # &amp; is 5 chars, & is 1 char, difference is 4
 
 # Then &lt; entities
 original_len=${#content}
 content="${content//&lt;/<}"
-lt_count=$(( (original_len - ${#content}) / 3 ))  # &lt; is 4 chars, < is 1 char, difference is 3
+lt_count=$(((original_len - ${#content}) / 3)) # &lt; is 4 chars, < is 1 char, difference is 3
 
 # Then &gt; entities
 original_len=${#content}
 content="${content//&gt;/>}"
-gt_count=$(( (original_len - ${#content}) / 3 ))  # &gt; is 4 chars, > is 1 char, difference is 3
+gt_count=$(((original_len - ${#content}) / 3)) # &gt; is 4 chars, > is 1 char, difference is 3
 
 # Then &quot; entities
 original_len=${#content}
 content="${content//&quot;/\"}"
-quot_count=$(( (original_len - ${#content}) / 5 ))  # &quot; is 6 chars, " is 1 char, difference is 5
+quot_count=$(((original_len - ${#content}) / 5)) # &quot; is 6 chars, " is 1 char, difference is 5
 
 # Finally &#39; entities (apostrophes)
 original_len=${#content}
 content="${content//&#39;/\'}"
-apos_count=$(( (original_len - ${#content}) / 4 ))  # &#39; is 5 chars, ' is 1 char, difference is 4
+apos_count=$(((original_len - ${#content}) / 4)) # &#39; is 5 chars, ' is 1 char, difference is 4
 
 total_entity_count=$((amp_count + lt_count + gt_count + quot_count + apos_count))
 debug_print "parsing: decoded $total_entity_count html entities (amp: $amp_count, lt: $lt_count, gt: $gt_count, quot: $quot_count, apos: $apos_count)"
