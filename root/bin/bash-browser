@@ -300,19 +300,34 @@ follow_links() {
 
     printf "\e[?25h\033c"
 
-    # Handle root-relative URLs like /foo/bar
+    # Handle different types of relative URLs
     if [[ "$target_url" != "http"* ]]; then
+      # Get the base URL components
+      local protocol="${url%%://*}"
+      local temp="${url#*//}"
+      local host="${temp%%/*}"
+      local base_path="${temp#"$host"}"
+      
       if [[ "$target_url" == "/"* ]]; then
-        local protocol="${url%%://*}"
-        local tmp="${url#*//}"
-        local host="${tmp%%/*}"
+        # Root-relative URL like /foo/bar
         target_url="${protocol}://${host}${target_url}"
+      elif [[ "$target_url" == "../"* ]]; then
+        # Parent directory relative URL like ../foo/bar
+        # Remove the current file name and go up directories as needed
+        while [[ "$target_url" == "../"* ]]; do
+          target_url="${target_url#../}"
+          # Remove last path component from base_path
+          base_path="${base_path%/*}"
+        done
+        target_url="${protocol}://${host}${base_path}/${target_url}"
+      elif [[ "$target_url" == "./"* ]]; then
+        # Current directory relative like ./foo/bar
+        base_path="${base_path%/*}"  # Remove current file
+        target_url="${protocol}://${host}${base_path}/${target_url#./}"
       else
-        printf "\e[${height};0H\e[41m"
-        printf "%-${term_width}s" "Cannot follow relative URL: $target_url"
-        printf "\e[0m"
-        sleep 2
-        return
+        # Same directory relative like foo.html
+        base_path="${base_path%/*}"  # Remove current file
+        target_url="${protocol}://${host}${base_path}/${target_url}"
       fi
     fi
 
