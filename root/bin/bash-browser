@@ -1,5 +1,91 @@
 #!/bin/bash
 
+debug=0
+verbose=0
+
+# Parse arguments
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --debug)
+      debug=1
+      verbose=1
+      ;;
+    --verbose)
+      debug=1
+      verbose=1
+      ;;
+    *)
+      args+=("$arg")
+      ;;
+  esac
+done
+
+set -- "${args[@]}"
+
+debug_print() {
+  if [[ $debug -eq 1 ]]; then
+    echo "$1" >&2
+  fi
+}
+
+verbose_print() {
+  if [[ $verbose -eq 1 ]]; then
+    echo "$1" >&2
+  fi
+}
+
+# Function to print content with limited output to avoid flooding the console
+print_content_preview() {
+  if [[ $verbose -eq 1 ]]; then
+    local preview_lines=5
+    local line_count=0
+    
+    while IFS= read -r line; do
+      if ((line_count >= preview_lines)); then
+        echo "  ... and $(( $(wc -l <<< "$1") - preview_lines )) more lines" >&2
+        break
+      fi
+      echo "  Line $((line_count+1)): $line" >&2
+      ((line_count++))
+    done <<< "$1"
+  fi
+}
+
+timing_start_time=0
+start_timing() {
+  # Use date +%s%N to get nanosecond precision timing if available, otherwise use seconds
+  if command -v date >/dev/null 2>&1; then
+    if [[ $(date +"%N" 2>/dev/null) ]]; then
+      timing_start_time=$(date +"%s%N")
+    else
+      timing_start_time=$(date +"%s")000000000
+    fi
+  else
+    timing_start_time=0
+  fi
+}
+
+get_elapsed_time() {
+  if [[ $timing_start_time -eq 0 ]]; then
+    echo "0s 0ms"
+    return
+  fi
+
+  local current_time
+  if [[ $(date +"%N" 2>/dev/null) ]]; then
+    current_time=$(date +"%s%N")
+  else
+    current_time=$(date +"%s")000000000
+  fi
+
+  local elapsed_ns=$((current_time - timing_start_time))
+  local elapsed_s=$((elapsed_ns / 1000000000))
+  local elapsed_ms=$(((elapsed_ns % 1000000000) / 1000000))
+  
+  echo "${elapsed_s}s ${elapsed_ms}ms"
+}
+
 get_term_size() {
   # This uses an alternative escape sequence (\e[18t) to get terminal size,
   # which has proven to be more reliable.
@@ -21,7 +107,7 @@ get_term_size() {
 }
 
 if [ $# -eq 0 ]; then
-  echo "usage: bash-browser <url>"
+  echo "usage: bash-browser [--debug] <url>"
   exit 1
 fi
 
@@ -29,10 +115,17 @@ url="$1"
 if [[ ! "$url" == *"://"* ]]; then
   url="http://$url"
 fi
-echo "loading..."
 
-echo "fetching: $url"
+if [ $debug -eq 1 ]; then
+  debug_print "Starting bash-browser with debug mode enabled"
+  debug_print "loading..."
+  debug_print "fetching: $url"
+else
+  echo "loading..."
+  echo "fetching: $url"
+fi
 
+start_timing  # Start measuring parsing time
 # Use the curl script to download content
 content="$("/home/meow/code/bash-browser/root/bin/curl" "$url")"
 if [ $? -ne 0 ]; then
@@ -42,75 +135,87 @@ fi
 
 # Basic HTML tag stripping and decoding, optimized to run on the whole content at once.
 
+debug_print "starting html parsing..."
+
 # 1. Remove HTML comments using pure bash
 # This is still iterative, but runs on the whole buffer, not line-by-line
+debug_print "parsing: removing html comments"
+comment_count=0
 while [[ "$content" == *"<!--"*"-->"* ]]; do
   start_comment="${content%%<!--*}"
   end_comment="${content#*-->}"
   content="${start_comment}${end_comment}"
+  ((comment_count++))
 done
+debug_print "parsing: removed $comment_count html comments"
 
 # 1.5. Process <a> tags to make links visible: <a href="URL">TEXT</a> -> TEXT [URL]
 # Since HTML tags can span multiple lines, we'll convert to single line temporarily, process, then restore
 # Use a unique marker that won't appear in HTML content
 
-LINE_MARKER="___BASHBROWSER_LINEBREAK___"
+debug_print "parsing: processing anchor tags"
+verbose_print "parsing: starting anchor tag processing"
+LINK_MARKER="___BASHBROWSER_LINEBREAK___"
 
 # Convert newlines to markers to allow multi-line pattern matching
-temp_content="${content//$'\n'/$LINE_MARKER}"
+temp_content="${content//$'\n'/$LINK_MARKER}"
+verbose_print "parsing: converted newlines to markers, content length: ${#temp_content}"
 
-# Process <A HREF= tags (upper case)
-# Since newlines are converted to markers, we need to find <A that might have markers before attributes
-# This pattern now looks for <A followed by any amount of content (including markers) to HREF=
+# Process both uppercase and lowercase anchor tags in a simplified way
 original_temp="$temp_content"
+link_count=0
+
+# Process uppercase A tags first
 while [[ "$temp_content" == *"<A"* ]]; do
   # Find the complete opening tag structure by looking for <A, then everything up to the first >, then content to </A>
   if [[ "$temp_content" != *"<A"*">"*"</A>"* ]]; then
-    break  # No complete <A>...</A> tag found
+    break # No complete <A>...</A> tag found
   fi
-  
+
   before_a="${temp_content%%<A*}"
   after_a="${temp_content#*<A}"
-  
+
   # Get the part up to first > (the tag attributes) and part after > (the content)
   if [[ "$after_a" != *">"* ]]; then
-    break  # No closing > found
+    break # No closing > found
   fi
-  
+
   tag_attrs_part="${after_a%%>*}"
   content_after_opening="${after_a#*>}"
-  
+
   # Check if HREF exists in the tag attributes
   if [[ "$tag_attrs_part" == *"HREF="* ]]; then
     # Extract the href URL
     after_href="${tag_attrs_part#*HREF=}"
     quote_char="${after_href:0:1}"
-    
-          if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
-            url_part="${after_href:1}"
-            href_url="${url_part%%"$quote_char"*}"
-          else
-            href_url="${after_href%%[[:space:]>\<]*}"
-          fi
-        
-        # Now find the content within the tag and the part after closing </A>
-        if [[ "$content_after_opening" != *"</A>"* ]]; then
-          break  # No closing </A> found
-        fi
-        
-        anchor_content="${content_after_opening%%</A>*}"
-        after_closing="${content_after_opening#*</A>}"
-        
-        # Construct the replacement
-        full_opening_tag="<A${tag_attrs_part}>"
-        full_pattern="${full_opening_tag}${anchor_content}</A>"
-        replacement="${anchor_content} [${href_url}]"    
+
+    if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
+      url_part="${after_href:1}"
+      href_url="${url_part%%"$quote_char"*}"
+    else
+      href_url="${after_href%%[[:space:]>\<]*}"
+    fi
+
+    # Now find the content within the tag and the part after closing </A>
+    if [[ "$content_after_opening" != *"</A>"* ]]; then
+      break # No closing </A> found
+    fi
+
+    anchor_content="${content_after_opening%%</A>*}"
+    after_closing="${content_after_opening#*</A>}"
+
+    # Construct the replacement
+    full_opening_tag="<A${tag_attrs_part}>"
+    full_pattern="${full_opening_tag}${anchor_content}</A>"
+    replacement="${anchor_content} [${href_url}]"
     temp_content="${temp_content/"$full_pattern"/"$replacement"}"
+    ((link_count++))
+    debug_print "parsing: processed uppercase A tag: $href_url"
   else
     # No HREF in this tag, break to avoid infinite loop
     break
   fi
-  
+
   # Prevent infinite loop
   if [[ "$temp_content" == "$original_temp" ]]; then
     break
@@ -118,99 +223,232 @@ while [[ "$temp_content" == *"<A"* ]]; do
   original_temp="$temp_content"
 done
 
-# Process <a href= tags (lower case) similarly
-original_temp="$temp_content"
+# Process lowercase a tags
 while [[ "$temp_content" == *"<a"* ]]; do
   if [[ "$temp_content" != *"<a"*">"*"</a>"* ]]; then
     break
   fi
-  
+
   before_a="${temp_content%%<a*}"
   after_a="${temp_content#*<a}"
-  
+
   if [[ "$after_a" != *">"* ]]; then
     break
   fi
-  
+
   tag_attrs_part="${after_a%%>*}"
   content_after_opening="${after_a#*>}"
-  
+
   if [[ "$tag_attrs_part" == *"href="* ]]; then
     after_href="${tag_attrs_part#*href=}"
     quote_char="${after_href:0:1}"
-    
+
     if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
       url_part="${after_href:1}"
       href_url="${url_part%%"$quote_char"*}"
     else
       href_url="${after_href%%[[:space:]>\<]*}"
     fi
-    
+
     if [[ "$content_after_opening" != *"</a>"* ]]; then
       break
     fi
-    
+
     anchor_content="${content_after_opening%%</a>*}"
     after_closing="${content_after_opening#*</a>}"
-    
+
     full_opening_tag="<a${tag_attrs_part}>"
     full_pattern="${full_opening_tag}${anchor_content}</a>"
     replacement="${anchor_content} [${href_url}]"
-    
+
     temp_content="${temp_content/"$full_pattern"/"$replacement"}"
+    ((link_count++))
+    debug_print "parsing: processed lowercase a tag: $href_url"
   else
     break
   fi
-  
+
   if [[ "$temp_content" == "$original_temp" ]]; then
     break
   fi
   original_temp="$temp_content"
 done
+debug_print "parsing: processed $link_count anchor tags"
 
 # Convert back from markers to actual newlines
-content="${temp_content//$LINE_MARKER/$'\n'}"
+content="${temp_content//$LINK_MARKER/$'\n'}"
 
 # 2. Replace certain closing tags with newlines before removing all other tags
-# Handle h1-h6 tags
+debug_print "parsing: replacing closing tags with newlines"
+
+# Count each type of tag by replacing all occurrences and counting differences in length
+# This is efficient as it does the counting in a temporary variable without modifying the main content
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+
+# Count and replace h1 tags (</h1> -> \n\n)
+temp_count_content="${temp_count_content//<\/h1>/}"
+h1_count=$(( (initial_length - ${#temp_count_content}) / 5 ))  # length of '</h1>' is 5
 content="${content//<\/h1>/$'\n'$'\n'}"
+
+# Count and replace h2 tags (</h2> -> \n\n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/h2>/}"
+h2_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/h2>/$'\n'$'\n'}"
+
+# Count and replace h3 tags (</h3> -> \n\n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/h3>/}"
+h3_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/h3>/$'\n'$'\n'}"
+
+# Count and replace h4 tags (</h4> -> \n\n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/h4>/}"
+h4_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/h4>/$'\n'$'\n'}"
+
+# Count and replace h5 tags (</h5> -> \n\n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/h5>/}"
+h5_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/h5>/$'\n'$'\n'}"
+
+# Count and replace h6 tags (</h6> -> \n\n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/h6>/}"
+h6_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/h6>/$'\n'$'\n'}"
-# Other block-level tags
+
+# Count and replace p tags (</p> -> \n\n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/p>/}"
+p_count=$(( (initial_length - ${#temp_count_content}) / 4 ))  # length of '</p>' is 4
 content="${content//<\/p>/$'\n'$'\n'}"
+
+# Count and replace br tags (<br>, <br/>, <br /> -> \n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<br>/}"
+br_count=$(( (initial_length - ${#temp_count_content}) / 4 ))  # length of '<br>' is 4
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<br\/>/}"
+br_count=$(( br_count + (initial_length - ${#temp_count_content}) / 5 ))  # length of '<br/>' is 5
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<br \/>/}"
+br_count=$(( br_count + (initial_length - ${#temp_count_content}) / 6 ))  # length of '<br />' is 6
 content="${content//<br>/$'\n'}"
 content="${content//<br\/>/$'\n'}"
 content="${content//<br \/>/$'\n'}"
+
+# Count and replace li tags (</li> -> \n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/li>/}"
+li_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/li>/$'\n'}"
+
+# Count and replace div tags (</div> -> \n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/div>/}"
+div_count=$(( (initial_length - ${#temp_count_content}) / 6 ))
 content="${content//<\/div>/$'\n'}"
+
+# Count and replace tr tags (</tr> -> \n)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/tr>/}"
+tr_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/tr>/$'\n'}"
+
+# Count and replace td tags (</td> -> tab)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/td>/}"
+td_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/td>/	}" # tab character
+
+# Count and replace th tags (</th> -> tab)
+temp_count_content="$content"
+initial_length=${#temp_count_content}
+temp_count_content="${temp_count_content//<\/th>/}"
+th_count=$(( (initial_length - ${#temp_count_content}) / 5 ))
 content="${content//<\/th>/	}" # tab character
 
+# Calculate total tag count
+total_closing_tags=$((h1_count + h2_count + h3_count + h4_count + h5_count + h6_count + p_count + br_count + li_count + div_count + tr_count + td_count + th_count))
+debug_print "parsing: replaced $total_closing_tags closing tags (h1: $h1_count, h2: $h2_count, h3: $h3_count, h4: $h4_count, h5: $h5_count, h6: $h6_count, p: $p_count, br: $br_count, li: $li_count, div: $div_count, tr: $tr_count, td: $td_count, th: $th_count)"
+
 # 3. Remove all remaining HTML tags iteratively
-# This is the main bottleneck, but necessary for correctness in pure bash
+debug_print "parsing: removing all remaining html tags"
+verbose_print "parsing: starting HTML tag removal process"
+tag_count=0
+initial_content_length=${#content}
 while [[ "$content" == *"<"*">"* ]]; do
   start_part="${content%%<*}"
   remaining="${content#*>}"
   content="${start_part}${remaining}"
+  ((tag_count++))
+  if (( tag_count % 100 == 0 )); then
+    verbose_print "parsing: removed $tag_count HTML tags so far, current content length: ${#content}"
+  fi
 done
+final_content_length=${#content}
+debug_print "parsing: removed $tag_count html tags"
+verbose_print "parsing: completed HTML tag removal process - removed $tag_count tags, content length changed from $initial_content_length to $final_content_length"
 
 # 4. Decode common HTML entities
+debug_print "parsing: decoding html entities"
+
+# Count each type of entity by replacing all occurrences and counting differences in length
+# First &amp; entities
+original_len=${#content}
 content="${content//&amp;/&}"
+amp_count=$(( (original_len - ${#content}) / 4 ))  # &amp; is 5 chars, & is 1 char, difference is 4
+
+# Then &lt; entities
+original_len=${#content}
 content="${content//&lt;/<}"
+lt_count=$(( (original_len - ${#content}) / 3 ))  # &lt; is 4 chars, < is 1 char, difference is 3
+
+# Then &gt; entities
+original_len=${#content}
 content="${content//&gt;/>}"
+gt_count=$(( (original_len - ${#content}) / 3 ))  # &gt; is 4 chars, > is 1 char, difference is 3
+
+# Then &quot; entities
+original_len=${#content}
 content="${content//&quot;/\"}"
+quot_count=$(( (original_len - ${#content}) / 5 ))  # &quot; is 6 chars, " is 1 char, difference is 5
+
+# Finally &#39; entities (apostrophes)
+original_len=${#content}
 content="${content//&#39;/\'}"
+apos_count=$(( (original_len - ${#content}) / 4 ))  # &#39; is 5 chars, ' is 1 char, difference is 4
+
+total_entity_count=$((amp_count + lt_count + gt_count + quot_count + apos_count))
+debug_print "parsing: decoded $total_entity_count html entities (amp: $amp_count, lt: $lt_count, gt: $gt_count, quot: $quot_count, apos: $apos_count)"
 
 # 5. Clean up extra blank lines
-# The previous steps can create lots of consecutive newlines, this collapses them.
-# Replace three or more newlines with two.
+debug_print "parsing: cleaning up extra blank lines"
+newline_count=0
 while [[ "$content" == *$'\n\n\n'* ]]; do
   content="${content//$'\n\n\n'/$'\n\n'}"
+  ((newline_count++))
 done
+debug_print "parsing: cleaned up $newline_count sets of extra blank lines"
+debug_print "parsing: completed successfully"
+debug_print "parsing: total time: $(get_elapsed_time)"
 
 # --- scrolling implementation ---
 
@@ -222,7 +460,7 @@ follow_links() {
 
   # Pattern to find http(s) URLs, excluding common trailing characters
   local url_pattern='https?://[^][<>"[:space:]]*'
-  
+
   # Pattern to find [URL] style links created from HTML <a> tags
   local bracket_url_pattern='\[([^]]*)\]'
 
@@ -246,17 +484,17 @@ follow_links() {
       line_content="${line_content#"${consumed_part}"}"
       col_offset=$((col_offset + ${#consumed_part}))
     done
-    
-    # Reset line content to look for bracket URLs 
+
+    # Reset line content to look for bracket URLs
     line_content="${lines[$line_index]}"
     col_offset=0
-    
+
     # Then look for bracket-style URLs like [WhatIs.html]
     while [[ "$line_content" =~ $bracket_url_pattern ]]; do
       # Extract the URL between brackets
       local full_match="${BASH_REMATCH[0]}"
       local found_url="${BASH_REMATCH[1]}"
-      
+
       local pre_match="${line_content%%"$full_match"*}"
       local col=$((col_offset + ${#pre_match} + 1))
 
@@ -344,12 +582,12 @@ follow_links() {
     else
       current_dir="${path_part%/*}"
     fi
-    
+
     # If current_dir is empty, it means we are at the root path.
     if [ -z "$current_dir" ]; then
       current_dir="/"
     fi
-    
+
     # Ensure current_dir ends with a slash for proper joining
     if [[ ! "$current_dir" == */ ]]; then
       current_dir="$current_dir/"
@@ -360,9 +598,9 @@ follow_links() {
     # Normalize the new path (handle .. and .)
     local OIFS="$IFS"
     IFS='/'
-    read -ra path_segments <<< "$new_path"
+    read -ra path_segments <<<"$new_path"
     IFS="$OIFS"
-    
+
     local final_segments=()
     for segment in "${path_segments[@]}"; do
       if [[ "$segment" == ".." ]]; then
@@ -388,10 +626,10 @@ follow_links() {
 
     # Ensure it's a valid path
     if [[ -z "$final_path" ]]; then
-        final_path="/"
+      final_path="/"
     # If it was absolute, it should start with /. If not, add it.
     elif [[ "${final_segments[0]}" == "" && "${final_path:0:1}" != "/" ]]; then
-        final_path="/$final_path"
+      final_path="/$final_path"
     fi
 
     exec "$0" "${protocol}://${host}${final_path}"
