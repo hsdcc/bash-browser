@@ -6,7 +6,7 @@ download() {
   # Extract host and path from url
   if [[ "$url" == *"/"* ]]; then
     # URL contains path, parse it
-    IFS='/' read -r protocol _ host query <<< "$url"
+    IFS='/' read -r protocol _ host query <<<"$url"
     # Reconstruct query as rest of URL
     query=$(echo "$url" | sed "s|[^/]*/[^/]*/[^/]*||")
   else

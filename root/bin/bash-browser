@@ -48,33 +48,126 @@ while [[ "$content" == *"<!--"*"-->"* ]]; do
 done
 
 # 1.5. Process <a> tags to make links visible: <a href="URL">TEXT</a> -> TEXT [URL]
-# This is a simplified parser that handles <a href="..."> but not other attributes well.
-while [[ "$content" == *"<a href="* && "$content" == *"</a>"* ]]; do
-  pre_a_tag="${content%%<a href=*}"
-  rest="${content#*<a href=*}"
+# Since HTML tags can span multiple lines, we'll convert to single line temporarily, process, then restore
+# Use a unique marker that won't appear in HTML content
 
-  quote_char="${rest:0:1}"
-  if [[ "$quote_char" != '"' && "$quote_char" != "'" ]]; then
-    # Could not find quote, skip this tag to avoid infinite loop
-    content="${pre_a_tag}${rest}"
-    continue
+LINE_MARKER="___BASHBROWSER_LINEBREAK___"
+
+# Convert newlines to markers to allow multi-line pattern matching
+temp_content="${content//$'\n'/$LINE_MARKER}"
+
+# Process <A HREF= tags (upper case)
+# Since newlines are converted to markers, we need to find <A that might have markers before attributes
+# This pattern now looks for <A followed by any amount of content (including markers) to HREF=
+original_temp="$temp_content"
+while [[ "$temp_content" == *"<A"* ]]; do
+  # Find the complete opening tag structure by looking for <A, then everything up to the first >, then content to </A>
+  if [[ "$temp_content" != *"<A"*">"*"</A>"* ]]; then
+    break  # No complete <A>...</A> tag found
   fi
-
-  rest_no_quote="${rest#"$quote_char"}"
-  url="${rest_no_quote%%"$quote_char"*}"
-
-  # Ensure we have a closing > for the <a> tag
-  if [[ "$rest" != *">"* ]]; then
-    content="${pre_a_tag}${rest}"
-    continue
+  
+  before_a="${temp_content%%<A*}"
+  after_a="${temp_content#*<A}"
+  
+  # Get the part up to first > (the tag attributes) and part after > (the content)
+  if [[ "$after_a" != *">"* ]]; then
+    break  # No closing > found
   fi
-
-  text_and_post="${rest#*>}"
-  text="${text_and_post%%</a>*}"
-  post_a_tag="${text_and_post#*</a>}"
-
-  content="${pre_a_tag}${text} [${url}]${post_a_tag}"
+  
+  tag_attrs_part="${after_a%%>*}"
+  content_after_opening="${after_a#*>}"
+  
+  # Check if HREF exists in the tag attributes
+  if [[ "$tag_attrs_part" == *"HREF="* ]]; then
+    # Extract the href URL
+    after_href="${tag_attrs_part#*HREF=}"
+    quote_char="${after_href:0:1}"
+    
+    if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
+      url_part="${after_href:1}"
+      url="${url_part%%"$quote_char"*}"
+    else
+      url="${after_href%%[[:space:]>\<]*}"
+    fi
+    
+    # Now find the content within the tag and the part after closing </A>
+    if [[ "$content_after_opening" != *"</A>"* ]]; then
+      break  # No closing </A> found
+    fi
+    
+    anchor_content="${content_after_opening%%</A>*}"
+    after_closing="${content_after_opening#*</A>}"
+    
+    # Construct the replacement
+    full_opening_tag="<A${tag_attrs_part}>"
+    full_pattern="${full_opening_tag}${anchor_content}</A>"
+    replacement="${anchor_content} [${url}]"
+    
+    temp_content="${temp_content/"$full_pattern"/"$replacement"}"
+  else
+    # No HREF in this tag, break to avoid infinite loop
+    break
+  fi
+  
+  # Prevent infinite loop
+  if [[ "$temp_content" == "$original_temp" ]]; then
+    break
+  fi
+  original_temp="$temp_content"
 done
+
+# Process <a href= tags (lower case) similarly
+original_temp="$temp_content"
+while [[ "$temp_content" == *"<a"* ]]; do
+  if [[ "$temp_content" != *"<a"*">"*"</a>"* ]]; then
+    break
+  fi
+  
+  before_a="${temp_content%%<a*}"
+  after_a="${temp_content#*<a}"
+  
+  if [[ "$after_a" != *">"* ]]; then
+    break
+  fi
+  
+  tag_attrs_part="${after_a%%>*}"
+  content_after_opening="${after_a#*>}"
+  
+  if [[ "$tag_attrs_part" == *"href="* ]]; then
+    after_href="${tag_attrs_part#*href=}"
+    quote_char="${after_href:0:1}"
+    
+    if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
+      url_part="${after_href:1}"
+      url="${url_part%%"$quote_char"*}"
+    else
+      url="${after_href%%[[:space:]>\<]*}"
+    fi
+    
+    if [[ "$content_after_opening" != *"</a>"* ]]; then
+      break
+    fi
+    
+    anchor_content="${content_after_opening%%</a>*}"
+    after_closing="${content_after_opening#*</a>}"
+    
+    full_opening_tag="<a${tag_attrs_part}>"
+    full_pattern="${full_opening_tag}${anchor_content}</a>"
+    replacement="${anchor_content} [${url}]"
+    
+    temp_content="${temp_content/"$full_pattern"/"$replacement"}"
+  else
+    break
+  fi
+  
+  if [[ "$temp_content" == "$original_temp" ]]; then
+    break
+  fi
+  original_temp="$temp_content"
+done
+
+# Convert back from markers to actual newlines
+content="${temp_content//$LINE_MARKER/$'\n'}"
 
 # 2. Replace certain closing tags with newlines before removing all other tags
 # Handle h1-h6 tags
@@ -127,6 +220,9 @@ follow_links() {
 
   # Pattern to find http(s) URLs, excluding common trailing characters
   local url_pattern='https?://[^][<>"[:space:]]*'
+  
+  # Pattern to find [URL] style links created from HTML <a> tags
+  local bracket_url_pattern='\[([^]]*)\]'
 
   for ((i = 0; i < view_height; i++)); do
     local line_index=$((offset + i))
@@ -135,6 +231,7 @@ follow_links() {
     local line_content="${lines[$line_index]}"
     local col_offset=0
 
+    # First look for http(s) URLs
     while [[ "$line_content" =~ $url_pattern ]]; do
       local url="${BASH_REMATCH[0]}"
       local pre_match="${line_content%%"$url"*}"
@@ -144,6 +241,27 @@ follow_links() {
       link_positions+=("$((i + 1));$col")
 
       local consumed_part="${pre_match}${url}"
+      line_content="${line_content#"${consumed_part}"}"
+      col_offset=$((col_offset + ${#consumed_part}))
+    done
+    
+    # Reset line content to look for bracket URLs 
+    line_content="${lines[$line_index]}"
+    col_offset=0
+    
+    # Then look for bracket-style URLs like [WhatIs.html]
+    while [[ "$line_content" =~ $bracket_url_pattern ]]; do
+      # Extract the URL between brackets
+      local full_match="${BASH_REMATCH[0]}"
+      local url="${BASH_REMATCH[1]}"
+      
+      local pre_match="${line_content%%"$full_match"*}"
+      local col=$((col_offset + ${#pre_match} + 1))
+
+      visible_links+=("$url")
+      link_positions+=("$((i + 1));$col")
+
+      local consumed_part="${pre_match}${full_match}"
       line_content="${line_content#"${consumed_part}"}"
       col_offset=$((col_offset + ${#consumed_part}))
     done
