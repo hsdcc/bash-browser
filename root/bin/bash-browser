@@ -86,26 +86,25 @@ while [[ "$temp_content" == *"<A"* ]]; do
     after_href="${tag_attrs_part#*HREF=}"
     quote_char="${after_href:0:1}"
     
-    if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
-      url_part="${after_href:1}"
-      url="${url_part%%"$quote_char"*}"
-    else
-      url="${after_href%%[[:space:]>\<]*}"
-    fi
-    
-    # Now find the content within the tag and the part after closing </A>
-    if [[ "$content_after_opening" != *"</A>"* ]]; then
-      break  # No closing </A> found
-    fi
-    
-    anchor_content="${content_after_opening%%</A>*}"
-    after_closing="${content_after_opening#*</A>}"
-    
-    # Construct the replacement
-    full_opening_tag="<A${tag_attrs_part}>"
-    full_pattern="${full_opening_tag}${anchor_content}</A>"
-    replacement="${anchor_content} [${url}]"
-    
+          if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
+            url_part="${after_href:1}"
+            href_url="${url_part%%"$quote_char"*}"
+          else
+            href_url="${after_href%%[[:space:]>\<]*}"
+          fi
+        
+        # Now find the content within the tag and the part after closing </A>
+        if [[ "$content_after_opening" != *"</A>"* ]]; then
+          break  # No closing </A> found
+        fi
+        
+        anchor_content="${content_after_opening%%</A>*}"
+        after_closing="${content_after_opening#*</A>}"
+        
+        # Construct the replacement
+        full_opening_tag="<A${tag_attrs_part}>"
+        full_pattern="${full_opening_tag}${anchor_content}</A>"
+        replacement="${anchor_content} [${href_url}]"    
     temp_content="${temp_content/"$full_pattern"/"$replacement"}"
   else
     # No HREF in this tag, break to avoid infinite loop
@@ -142,9 +141,9 @@ while [[ "$temp_content" == *"<a"* ]]; do
     
     if [[ "$quote_char" == '"' || "$quote_char" == "'" ]]; then
       url_part="${after_href:1}"
-      url="${url_part%%"$quote_char"*}"
+      href_url="${url_part%%"$quote_char"*}"
     else
-      url="${after_href%%[[:space:]>\<]*}"
+      href_url="${after_href%%[[:space:]>\<]*}"
     fi
     
     if [[ "$content_after_opening" != *"</a>"* ]]; then
@@ -156,7 +155,7 @@ while [[ "$temp_content" == *"<a"* ]]; do
     
     full_opening_tag="<a${tag_attrs_part}>"
     full_pattern="${full_opening_tag}${anchor_content}</a>"
-    replacement="${anchor_content} [${url}]"
+    replacement="${anchor_content} [${href_url}]"
     
     temp_content="${temp_content/"$full_pattern"/"$replacement"}"
   else
@@ -236,14 +235,14 @@ follow_links() {
 
     # First look for http(s) URLs
     while [[ "$line_content" =~ $url_pattern ]]; do
-      local url="${BASH_REMATCH[0]}"
-      local pre_match="${line_content%%"$url"*}"
+      local found_url="${BASH_REMATCH[0]}"
+      local pre_match="${line_content%%"$found_url"*}"
       local col=$((col_offset + ${#pre_match} + 1))
 
-      visible_links+=("$url")
+      visible_links+=("$found_url")
       link_positions+=("$((i + 1));$col")
 
-      local consumed_part="${pre_match}${url}"
+      local consumed_part="${pre_match}${found_url}"
       line_content="${line_content#"${consumed_part}"}"
       col_offset=$((col_offset + ${#consumed_part}))
     done
@@ -256,12 +255,12 @@ follow_links() {
     while [[ "$line_content" =~ $bracket_url_pattern ]]; do
       # Extract the URL between brackets
       local full_match="${BASH_REMATCH[0]}"
-      local url="${BASH_REMATCH[1]}"
+      local found_url="${BASH_REMATCH[1]}"
       
       local pre_match="${line_content%%"$full_match"*}"
       local col=$((col_offset + ${#pre_match} + 1))
 
-      visible_links+=("$url")
+      visible_links+=("$found_url")
       link_positions+=("$((i + 1));$col")
 
       local consumed_part="${pre_match}${full_match}"
@@ -396,8 +395,6 @@ follow_links() {
     fi
 
     exec "$0" "${protocol}://${host}${final_path}"
-
-    exec "$0" "$target_url"
   fi
   # If key is not a valid hint, we do nothing and the main loop will redraw the screen.
 }
