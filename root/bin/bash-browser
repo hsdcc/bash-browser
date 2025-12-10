@@ -301,80 +301,72 @@ follow_links() {
     printf "\e[?25h\033c"
 
     # Handle different types of relative URLs
-    if [[ "$target_url" != "http"* ]]; then
+    if [[ "$target_url" != "http"* && "$target_url" != "https"* ]]; then
       # Get the base URL components
       local original_url="$url"
-      # Extract protocol (http or https)
       local protocol="${original_url%%://*}"
-      # Extract everything after the protocol
       local after_protocol="${original_url#*://}"
-      # Extract the host (domain)
       local host="${after_protocol%%/*}"
+      local current_path
       
-      # Extract current path (everything after the host)
-      local current_path="${after_protocol#"$host"}"
-      
-      # If no path was found (i.e., original_url is just domain), default to root
-      if [[ "$current_path" == "$after_protocol" ]]; then
-        current_path="/"
-      elif [[ "$current_path" == "" ]]; then
+      # Check if there is a path component
+      if [[ "$after_protocol" == *"/"* ]]; then
+        current_path="/${after_protocol#*/}"
+      else
         current_path="/"
       fi
-      
-      # If current_path is a file (not ending with /), extract the directory
-      if [[ "$current_path" != */ && "$current_path" != "/" ]]; then
-        current_path="${current_path%/*}/"
-        if [[ "$current_path" == "" ]]; then
-          current_path="/"
-        else
-          current_path="${current_path%/}/"
-        fi
-      fi
-      
-      # Build the final URL based on the type of relative path
-      if [[ "$target_url" == "/"* ]]; then
-        # Root-relative: /path/to/file
+
+      if [[ "$target_url" == //* ]]; then
+        # Protocol-relative URL, e.g. //example.com/path
+        target_url="${protocol}:${target_url}"
+      elif [[ "$target_url" == /* ]]; then
+        # Root-relative URL, e.g. /path/to/file
         target_url="${protocol}://${host}${target_url}"
-      elif [[ "$target_url" == "../"* ]]; then
-        # Directory traversal: ../path/to/file
-        # Start with current directory and go up for each ../
-        local work_path="$current_path"
-        
-        # Process each ../ component
-        local temp_target="$target_url"
-        while [[ "$temp_target" == "../"* ]]; do
-          # Remove one ../ from the target
-          temp_target="${temp_target#../}"
-          # Go up one directory in work_path
-          if [[ "$work_path" != "/" ]]; then
-            work_path="${work_path%/}"
-            work_path="${work_path%/*}/"
-            if [[ "$work_path" == "" ]]; then
-              work_path="/"
+      else
+        # Document-relative URL, e.g. other.html or ../other.html
+
+        # Get the directory of the current path
+        local base_path
+        if [[ "$current_path" == */ ]]; then
+          base_path="$current_path"
+        else
+          base_path="${current_path%/*}/"
+        fi
+
+        # Combine base path with target url
+        local new_path="${base_path}${target_url}"
+
+        # Normalize the path (handle .. and .)
+        local OIFS="$IFS"
+        IFS='/'
+        read -ra path_parts <<< "$new_path"
+        IFS="$OIFS"
+
+        local normalized_parts=()
+        for part in "${path_parts[@]}"; do
+          if [[ -z "$part" || "$part" == "." ]]; then
+            continue
+          fi
+          if [[ "$part" == ".." ]]; then
+            if [ ${#normalized_parts[@]} -gt 0 ]; then
+              normalized_parts=("${normalized_parts[@]:0:${#normalized_parts[@]}-1}")
             fi
+          else
+            normalized_parts+=("$part")
           fi
         done
         
-        # Combine host, processed path, and remaining target
-        if [[ "$work_path" == "/" ]]; then
-          target_url="${protocol}://${host}/${temp_target}"
+        local final_path
+        if [ ${#normalized_parts[@]} -eq 0 ]; then
+            final_path="/"
         else
-          target_url="${protocol}://${host}${work_path}${temp_target}"
+            OIFS="$IFS"
+            IFS='/'
+            final_path="/${normalized_parts[*]}"
+            IFS="$OIFS"
         fi
-      elif [[ "$target_url" == "./"* ]]; then
-        # Current directory relative: ./path/to/file
-        if [[ "$current_path" == "/" ]]; then
-          target_url="${protocol}://${host}/${target_url#./}"
-        else
-          target_url="${protocol}://${host}${current_path}${target_url#./}"
-        fi
-      else
-        # Same directory relative: filename.html
-        if [[ "$current_path" == "/" ]]; then
-          target_url="${protocol}://${host}/${target_url}"
-        else
-          target_url="${protocol}://${host}${current_path}${target_url}"
-        fi
+
+        target_url="${protocol}://${host}${final_path}"
       fi
     fi
 
@@ -414,7 +406,7 @@ while true; do
   # status bar
   printf "\e[${height};0H" # move to last line
   printf "\e[44m"          # blue background
-  status_text=$(printf "%s | Line %s-%s/%s (j=down, k=up, q=quit, s=follow)" "$url" "$((offset + 1))" "$((offset + view_height))" "$line_count")
+  status_text=$(printf "%s" "$url")
   printf "%-${term_width}s" "$status_text" # pad to full width
   printf "\e[0m"                           # reset color
 
