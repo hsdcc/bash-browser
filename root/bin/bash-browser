@@ -391,21 +391,53 @@ debug_print "parsing: replaced $total_closing_tags closing tags (h1: $h1_count, 
 
 # 3. Remove all remaining HTML tags iteratively
 debug_print "parsing: removing all remaining html tags"
-verbose_print "parsing: starting HTML tag removal process"
 tag_count=0
-initial_content_length=${#content}
-while [[ "$content" == *"<"*">"* ]]; do
+verbose_tags=()  # Only capture first few tags for detailed display
+max_iterations=1000  # Prevent infinite loops
+iteration=0
+
+while [[ "$content" == *"<"*">"* ]] && [[ $iteration -lt $max_iterations ]]; do
   start_part="${content%%<*}"
+  tag_and_rest="${content#<*}"
+  tag="${tag_and_rest%%>*}"
   remaining="${content#*>}"
-  content="${start_part}${remaining}"
+  new_content="${start_part}${remaining}"
+  
+  # If the content didn't change, we have an infinite loop situation
+  if [[ "$new_content" == "$content" ]]; then
+    debug_print "parsing: potential infinite loop detected at iteration $iteration, breaking"
+    break
+  fi
+  
+  content="$new_content"
   ((tag_count++))
-  if (( tag_count % 100 == 0 )); then
-    verbose_print "parsing: removed $tag_count HTML tags so far, current content length: ${#content}"
+  ((iteration++))
+  
+  # Keep track of first few tags for display, but limit to avoid too much output
+  if [[ $debug -eq 1 ]] && [[ $verbose -eq 1 ]] && [[ $tag_count -le 5 ]]; then
+    verbose_tags+=("<$tag>")
+  fi
+  
+  # Show progress every 50 tags to avoid overwhelming output
+  if [[ $debug -eq 1 ]] && (( tag_count % 50 == 0 )); then
+    debug_print "parsing: removed $tag_count tags so far"
   fi
 done
-final_content_length=${#content}
+
+# Show detailed output if in verbose mode
+if [[ $verbose -eq 1 ]]; then
+  for tag in "${verbose_tags[@]}"; do
+    debug_print "parsing: removed tag $tag"
+  done
+  if [[ $tag_count -gt 5 ]]; then
+    debug_print "parsing: ... and $((tag_count - 5)) more tags"
+  fi
+fi
+
 debug_print "parsing: removed $tag_count html tags"
-verbose_print "parsing: completed HTML tag removal process - removed $tag_count tags, content length changed from $initial_content_length to $final_content_length"
+if [[ $iteration -ge $max_iterations ]]; then
+  debug_print "parsing: stopped at max iterations ($max_iterations) to prevent infinite loop"
+fi
 
 # 4. Decode common HTML entities
 debug_print "parsing: decoding html entities"
