@@ -26,6 +26,9 @@ if [ $# -eq 0 ]; then
 fi
 
 url="$1"
+if [[ ! "$url" == *"://"* ]]; then
+  url="http://$url"
+fi
 echo "loading..."
 
 echo "fetching: $url"
@@ -300,75 +303,99 @@ follow_links() {
 
     printf "\e[?25h\033c"
 
-    # Handle different types of relative URLs
-    if [[ "$target_url" != "http"* && "$target_url" != "https"* ]]; then
-      # Get the base URL components
-      local original_url="$url"
-      local protocol="${original_url%%://*}"
-      local after_protocol="${original_url#*://}"
-      local host="${after_protocol%%/*}"
-      local current_path
-      
-      # Check if there is a path component
-      if [[ "$after_protocol" == *"/"* ]]; then
-        current_path="/${after_protocol#*/}"
-      else
-        current_path="/"
-      fi
+    # --- NEW URL RESOLUTION LOGIC ---
 
-      if [[ "$target_url" == //* ]]; then
-        # Protocol-relative URL, e.g. //example.com/path
-        target_url="${protocol}:${target_url}"
-      elif [[ "$target_url" == /* ]]; then
-        # Root-relative URL, e.g. /path/to/file
-        target_url="${protocol}://${host}${target_url}"
-      else
-        # Document-relative URL, e.g. other.html or ../other.html
-
-        # Get the directory of the current path
-        local base_path
-        if [[ "$current_path" == */ ]]; then
-          base_path="$current_path"
-        else
-          base_path="${current_path%/*}/"
-        fi
-
-        # Combine base path with target url
-        local new_path="${base_path}${target_url}"
-
-        # Normalize the path (handle .. and .)
-        local OIFS="$IFS"
-        IFS='/'
-        read -ra path_parts <<< "$new_path"
-        IFS="$OIFS"
-
-        local normalized_parts=()
-        for part in "${path_parts[@]}"; do
-          if [[ -z "$part" || "$part" == "." ]]; then
-            continue
-          fi
-          if [[ "$part" == ".." ]]; then
-            if [ ${#normalized_parts[@]} -gt 0 ]; then
-              normalized_parts=("${normalized_parts[@]:0:${#normalized_parts[@]}-1}")
-            fi
-          else
-            normalized_parts+=("$part")
-          fi
-        done
-        
-        local final_path
-        if [ ${#normalized_parts[@]} -eq 0 ]; then
-            final_path="/"
-        else
-            OIFS="$IFS"
-            IFS='/'
-            final_path="/${normalized_parts[*]}"
-            IFS="$OIFS"
-        fi
-
-        target_url="${protocol}://${host}${final_path}"
-      fi
+    # Ensure base URL is absolute
+    local base_url="$url"
+    if [[ ! "$base_url" == *"://"* ]]; then
+      # This is a safeguard. The script should ensure url is always absolute.
+      # If it's not, we can't reliably resolve relative paths.
+      # We'll attempt to fix it, but this indicates a deeper problem.
+      base_url="http://$base_url"
     fi
+
+    # If target is already a full URL, we're done.
+    if [[ "$target_url" == "http"* || "$target_url" == "https"* ]]; then
+      exec "$0" "$target_url"
+      return
+    fi
+
+    local protocol="${base_url%%://*}"
+    local rest="${base_url#*://}"
+    local host="${rest%%/*}"
+    local path_part="${rest#$host}"
+
+    # If target is protocol-relative (e.g., //example.com), prepend protocol
+    if [[ "$target_url" == //* ]]; then
+      exec "$0" "${protocol}:${target_url}"
+      return
+    fi
+
+    # If target is root-relative (e.g., /foo/bar), combine with host
+    if [[ "$target_url" == /* ]]; then
+      exec "$0" "${protocol}://${host}${target_url}"
+      return
+    fi
+
+    # It's a document-relative link (e.g., "foo.html" or "../foo.html")
+    # Get the directory of the current path
+    local current_dir
+    if [[ "$path_part" == */ ]]; then
+      current_dir="$path_part"
+    else
+      current_dir="${path_part%/*}"
+    fi
+    
+    # If current_dir is empty, it means we are at the root path.
+    if [ -z "$current_dir" ]; then
+      current_dir="/"
+    fi
+    
+    # Ensure current_dir ends with a slash for proper joining
+    if [[ ! "$current_dir" == */ ]]; then
+      current_dir="$current_dir/"
+    fi
+
+    local new_path="${current_dir}${target_url}"
+
+    # Normalize the new path (handle .. and .)
+    local OIFS="$IFS"
+    IFS='/'
+    read -ra path_segments <<< "$new_path"
+    IFS="$OIFS"
+    
+    local final_segments=()
+    for segment in "${path_segments[@]}"; do
+      if [[ "$segment" == ".." ]]; then
+        if [ ${#final_segments[@]} -gt 0 ]; then
+          # Don't pop the initial empty segment for the root
+          if ! { [ ${#final_segments[@]} -eq 1 ] && [ -z "${final_segments[0]}" ]; }; then
+            final_segments=("${final_segments[@]:0:${#final_segments[@]}-1}")
+          fi
+        fi
+      elif [[ "$segment" != "." && -n "$segment" ]]; then
+        final_segments+=("$segment")
+      # Handle the case where the path is just "/" or similar
+      elif [[ -z "$segment" && ${#final_segments[@]} -eq 0 ]]; then
+        final_segments+=("")
+      fi
+    done
+
+    # Reconstruct the final path from segments
+    OIFS="$IFS"
+    IFS='/'
+    final_path="${final_segments[*]}"
+    IFS="$OIFS"
+
+    # Ensure it's a valid path
+    if [[ -z "$final_path" ]]; then
+        final_path="/"
+    # If it was absolute, it should start with /. If not, add it.
+    elif [[ "${final_segments[0]}" == "" && "${final_path:0:1}" != "/" ]]; then
+        final_path="/$final_path"
+    fi
+
+    exec "$0" "${protocol}://${host}${final_path}"
 
     exec "$0" "$target_url"
   fi
